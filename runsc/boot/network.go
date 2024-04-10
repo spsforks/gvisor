@@ -109,6 +109,10 @@ type FDBasedLink struct {
 	// NumChannels controls how many underlying FDs are to be used to
 	// create this endpoint.
 	NumChannels int
+
+	// ThreadsPerChannel controls how many threads are used to handle packets on
+	// each channel.
+	ThreadsPerChannel int
 }
 
 // BindOpt indicates whether the sentry or runsc process is responsible for
@@ -281,9 +285,12 @@ func (n *Network) CreateLinksAndRoutes(args *CreateLinksAndRoutesArgs, _ *struct
 			return err
 		}
 		if version.AtLeast(5, 6) {
-			dispatchMode = fdbased.PacketMMap
+			// TODO(b/333120887): Switch back to using the packet mmap dispatcher when
+			// we have the performance data to justify it.
+			// dispatchMode = fdbased.PacketMMap
+			// log.Infof("Host kernel version >= 5.6, using to packet mmap to dispatch")
 		} else {
-			log.Infof("Host kernel version < 5.6, falling back to RecvMMsg dispatch")
+			log.Infof("Host kernel version < 5.6, using to RecvMMsg to dispatch")
 		}
 
 		for _, link := range args.FDBasedLinks {
@@ -316,6 +323,7 @@ func (n *Network) CreateLinksAndRoutes(args *CreateLinksAndRoutesArgs, _ *struct
 				TXChecksumOffload:  link.TXChecksumOffload,
 				RXChecksumOffload:  link.RXChecksumOffload,
 				GRO:                link.GVisorGRO,
+				ThreadsPerChannel:  link.ThreadsPerChannel,
 			})
 			if err != nil {
 				return err

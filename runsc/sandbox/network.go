@@ -287,6 +287,7 @@ func createInterfacesAndRoutesFromNS(conn *urpc.Client, nsPath string, conf *con
 				TXChecksumOffload: conf.TXChecksumOffload,
 				RXChecksumOffload: conf.RXChecksumOffload,
 				NumChannels:       conf.NumNetworkChannels,
+				ThreadsPerChannel: conf.NetworkThreadsPerChannel,
 				QDisc:             conf.QDisc,
 				Neighbors:         neighbors,
 				LinkAddress:       linkAddress,
