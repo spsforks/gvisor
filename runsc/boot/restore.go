@@ -40,16 +40,20 @@ const (
 	// CheckpointStateFileName is the file within the given image-path's
 	// directory which contains the container's saved state.
 	CheckpointStateFileName = "checkpoint.img"
+	// CheckpointPagesMetadataFileName is the file within the given image-path's
+	// directory containing the container's MemoryFile metadata.
+	CheckpointPagesMetadataFileName = "pages_meta.img"
 	// CheckpointPagesFileName is the file within the given image-path's
 	// directory containing the container's MemoryFile pages.
 	CheckpointPagesFileName = "pages.img"
 )
 
 type restorer struct {
-	container  *containerInfo
-	stateFile  io.Reader
-	pagesFile  *fd.FD
-	deviceFile *fd.FD
+	container     *containerInfo
+	stateFile     io.Reader
+	pagesMetadata *fd.FD
+	pagesFile     *fd.FD
+	deviceFile    *fd.FD
 }
 
 func createNetworkNamespaceForRestore(l *Loader) (*stack.Stack, *inet.Namespace, error) {
@@ -146,7 +150,7 @@ func (r *restorer) restore(l *Loader) error {
 	ctx = context.WithValue(ctx, pgalloc.CtxMemoryFileMap, mfmap)
 
 	// Load the state.
-	loadOpts := state.LoadOpts{Source: r.stateFile, PagesFile: r.pagesFile}
+	loadOpts := state.LoadOpts{Source: r.stateFile, PagesMetadata: r.pagesMetadata, PagesFile: r.pagesFile}
 	if err := loadOpts.Load(ctx, l.k, nil, netns.Stack(), time.NewCalibratedClocks(), &vfs.CompleteRestoreOptions{}); err != nil {
 		return err
 	}

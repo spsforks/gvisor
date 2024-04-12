@@ -35,7 +35,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -573,7 +572,7 @@ func loadPrivateMFs(ctx context.Context, r io.Reader, pr *statefile.AsyncReader)
 // SaveTo saves the state of k to w.
 //
 // Preconditions: The kernel must be paused throughout the call to SaveTo.
-func (k *Kernel) SaveTo(ctx context.Context, w io.Writer, pagesFile *os.File) error {
+func (k *Kernel) SaveTo(ctx context.Context, w io.Writer, pagesMetadata, pagesFile *fd.FD) error {
 	saveStart := time.Now()
 
 	// Do not allow other Kernel methods to affect it while it's being saved.
@@ -641,14 +640,18 @@ func (k *Kernel) SaveTo(ctx context.Context, w io.Writer, pagesFile *os.File) er
 
 	// Save the memory files' state.
 	memoryStart := time.Now()
-	pw := io.Writer(w)
+	pmw := w
+	if pagesMetadata != nil {
+		pmw = pagesMetadata
+	}
+	pw := w
 	if pagesFile != nil {
 		pw = pagesFile
 	}
-	if err := k.mf.SaveTo(ctx, w, pw); err != nil {
+	if err := k.mf.SaveTo(ctx, pmw, pw); err != nil {
 		return err
 	}
-	if err := savePrivateMFs(ctx, w, pw, mfsToSave); err != nil {
+	if err := savePrivateMFs(ctx, pmw, pw, mfsToSave); err != nil {
 		return err
 	}
 	log.Infof("Memory files save took [%s].", time.Since(memoryStart))
@@ -684,8 +687,19 @@ func (k *Kernel) invalidateUnsavableMappings(ctx context.Context) error {
 }
 
 // LoadFrom returns a new Kernel loaded from args.
-func (k *Kernel) LoadFrom(ctx context.Context, r io.Reader, pagesFile *fd.FD, timeReady chan struct{}, net inet.Stack, clocks sentrytime.Clocks, vfsOpts *vfs.CompleteRestoreOptions) error {
+func (k *Kernel) LoadFrom(ctx context.Context, r io.Reader, pagesMetadata, pagesFile *fd.FD, timeReady chan struct{}, net inet.Stack, clocks sentrytime.Clocks, vfsOpts *vfs.CompleteRestoreOptions) error {
 	loadStart := time.Now()
+
+	parallelMfLoad := pagesMetadata != nil && pagesFile != nil
+	var mfLoadWg sync.WaitGroup
+	var mfLoadErr error
+	if parallelMfLoad {
+		mfLoadWg.Add(1)
+		go func() {
+			defer mfLoadWg.Done()
+			mfLoadErr = k.loadMemoryFiles(ctx, r, pagesMetadata, pagesFile)
+		}()
+	}
 
 	k.runningTasksCond.L = &k.runningTasksMu
 	k.cpuClockTickerWakeCh = make(chan struct{}, 1)
@@ -724,26 +738,14 @@ func (k *Kernel) LoadFrom(ctx context.Context, r io.Reader, pagesFile *fd.FD, ti
 	// Restore the root network stack.
 	k.rootNetworkNamespace.RestoreRootStack(net)
 
-	// Load the memory files' state.
-	memoryStart := time.Now()
-	var pr *statefile.AsyncReader
-	if pagesFile != nil {
-		pr = statefile.NewAsyncReader(pagesFile, 0 /* off */)
+	if parallelMfLoad {
+		mfLoadWg.Wait()
+	} else {
+		mfLoadErr = k.loadMemoryFiles(ctx, r, pagesMetadata, pagesFile)
 	}
-	if err := k.mf.LoadFrom(ctx, r, pr); err != nil {
-		return err
+	if mfLoadErr != nil {
+		return mfLoadErr
 	}
-	if err := loadPrivateMFs(ctx, r, pr); err != nil {
-		return err
-	}
-	if pr != nil {
-		if err := pr.Close(); err != nil {
-			return err
-		}
-	}
-	log.Infof("Memory files load took [%s].", time.Since(memoryStart))
-
-	log.Infof("Overall load took [%s]", time.Since(loadStart))
 
 	k.Timekeeper().SetClocks(clocks)
 
@@ -773,6 +775,32 @@ func (k *Kernel) LoadFrom(ctx context.Context, r io.Reader, pagesFile *fd.FD, ti
 		return fmt.Errorf("UseHostCores enabled: can't increase ApplicationCores from %d to %d after restore", k.applicationCores, initAppCores)
 	}
 
+	return nil
+}
+
+func (k *Kernel) loadMemoryFiles(ctx context.Context, r io.Reader, pagesMetadata, pagesFile *fd.FD) error {
+	// Load the memory files' state.
+	memoryStart := time.Now()
+	pmr := r
+	if pagesMetadata != nil {
+		pmr = pagesMetadata
+	}
+	var pr *statefile.AsyncReader
+	if pagesFile != nil {
+		pr = statefile.NewAsyncReader(pagesFile, 0 /* off */)
+	}
+	if err := k.mf.LoadFrom(ctx, pmr, pr); err != nil {
+		return err
+	}
+	if err := loadPrivateMFs(ctx, pmr, pr); err != nil {
+		return err
+	}
+	if pr != nil {
+		if err := pr.Close(); err != nil {
+			return err
+		}
+	}
+	log.Infof("Memory files load took [%s].", time.Since(memoryStart))
 	return nil
 }
 

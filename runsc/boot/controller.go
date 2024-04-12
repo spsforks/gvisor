@@ -452,8 +452,9 @@ func (cm *containerManager) PortForward(opts *PortForwardOpts, _ *struct{}) erro
 type RestoreOpts struct {
 	// FilePayload contains the state file to be restored, followed in order by:
 	// 1. checkpoint state file.
-	// 2. optional checkpoint pages file.
-	// 3. optional platform device file.
+	// 2. optional checkpoint pages metadata file.
+	// 3. optional checkpoint pages file.
+	// 4. optional platform device file.
 	urpc.FilePayload
 	HavePagesFile  bool
 	HaveDeviceFile bool
@@ -495,13 +496,19 @@ func (cm *containerManager) Restore(o *RestoreOpts, _ *struct{}) error {
 
 	fileIdx := 1
 	if o.HavePagesFile {
-		pagesFile, err := o.ReleaseFD(fileIdx)
+		r.pagesMetadata, err = o.ReleaseFD(fileIdx)
 		if err != nil {
 			return err
 		}
-		defer pagesFile.Close()
+		defer r.pagesMetadata.Close()
 		fileIdx++
-		r.pagesFile = pagesFile
+
+		r.pagesFile, err = o.ReleaseFD(fileIdx)
+		if err != nil {
+			return err
+		}
+		defer r.pagesFile.Close()
+		fileIdx++
 	}
 
 	if o.HaveDeviceFile {
