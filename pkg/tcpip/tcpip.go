@@ -1510,6 +1510,9 @@ type Route struct {
 	// SourceHint indicates a preferred source address to use when NICs
 	// have multiple addresses.
 	SourceHint Address
+
+	// MTU is the maximum transmission unit supported by this route.
+	MTU uint32
 }
 
 // String implements the fmt.Stringer interface.
