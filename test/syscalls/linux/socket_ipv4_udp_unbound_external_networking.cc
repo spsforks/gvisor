@@ -63,8 +63,6 @@ void IPv4UDPUnboundExternalNetworkingSocketTest::SetUp() {
   }
 
   if (!(eth_if_.has_value() && lo_if_.has_value())) {
-    // FIXME(b/137899561): Linux instance for syscall tests sometimes misses its
-    // IPv4 address on eth0.
     GTEST_SKIP() << " eth_if_.has_value()=" << eth_if_.has_value()
                  << " lo_if_.has_value()=" << lo_if_.has_value();
   }
